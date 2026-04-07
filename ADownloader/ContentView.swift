@@ -12,26 +12,41 @@ import SwiftUI
 struct ContentView: View {
   @Environment(\.modelContext) private var modelContext
   @State private var isPresentingAddSheet = false
+  @State private var pendingSourceURL: String?
   @State private var store = DownloadStore()
 
   var body: some View {
     @Bindable var store = store
 
     NavigationSplitView {
-      List(DownloadSidebar.allCases, selection: $store.selectedSidebar) { sidebar in
-        Label {
-          HStack {
-            Text(sidebar.title)
-            Spacer()
-            Text(sidebar == .active ? "\(store.activeTasks.count)" : "\(store.completedTasks.count)")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(DownloadSidebar.allCases) { sidebar in
+          Button {
+            store.selectedSidebar = sidebar
+          } label: {
+            HStack {
+              Label(sidebar.title, systemImage: sidebar.systemImage)
+              Spacer()
+              Text("\(sidebarCount(for: sidebar, store: store))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .contentShape(.rect)
           }
-        } icon: {
-          Image(systemName: sidebar.systemImage)
+          .buttonStyle(.plain)
+          .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+              .fill(sidebar == store.selectedSidebar ? Color.accentColor.opacity(0.14) : .clear)
+          )
         }
+        Spacer()
       }
-      .listStyle(.sidebar)
+      .padding(12)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .background(Color(nsColor: .controlBackgroundColor))
       .navigationSplitViewColumnWidth(min: 180, ideal: 210)
     } detail: {
       ScrollView {
@@ -72,6 +87,22 @@ struct ContentView: View {
                 )
               }
             }
+
+          case .trash:
+            if store.removedTasks.isEmpty {
+              DownloadEmptyState(
+                title: "回收站是空的",
+                message: "删除的下载任务会出现在这里。"
+              )
+              .frame(minHeight: 320)
+            } else {
+              ForEach(store.removedTasks) { task in
+                TrashDownloadCard(
+                  task: task,
+                  onDelete: { store.permanentlyDelete(task) }
+                )
+              }
+            }
           }
         }
         .padding(24)
@@ -88,10 +119,16 @@ struct ContentView: View {
     }
     .sheet(isPresented: $isPresentingAddSheet) {
       AddDownloadSheet { sourceURL in
+        pendingSourceURL = sourceURL
+      }
+    }
+    .onChange(of: isPresentingAddSheet) { _, isPresented in
+      guard !isPresented, let sourceURL = pendingSourceURL else { return }
+      pendingSourceURL = nil
+
+      Task { @MainActor in
         guard let directoryURL = selectDownloadDirectory() else { return }
-        Task {
-          await store.addDownload(sourceURLString: sourceURL, directoryURL: directoryURL)
-        }
+        await store.addDownload(sourceURLString: sourceURL, directoryURL: directoryURL)
       }
     }
     .alert(
@@ -126,6 +163,17 @@ struct ContentView: View {
     panel.prompt = "选择"
     panel.message = "请选择下载保存目录。"
     return panel.runModal() == .OK ? panel.url : nil
+  }
+
+  private func sidebarCount(for sidebar: DownloadSidebar, store: DownloadStore) -> Int {
+    switch sidebar {
+    case .active:
+      store.activeTasks.count
+    case .completed:
+      store.completedTasks.count
+    case .trash:
+      store.removedTasks.count
+    }
   }
 }
 

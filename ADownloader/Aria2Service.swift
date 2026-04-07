@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Network
+import Darwin
 
 struct Aria2TaskSnapshot: Sendable {
   let gid: String
@@ -213,27 +213,39 @@ private extension Aria2Service {
   }
 
   static func allocatePort() async throws -> Int {
-    try await withCheckedThrowingContinuation { continuation in
-      do {
-        let listener = try NWListener(using: .tcp, on: .any)
-        listener.stateUpdateHandler = { state in
-          switch state {
-          case .ready:
-            let port = Int(listener.port?.rawValue ?? 0)
-            listener.cancel()
-            continuation.resume(returning: port)
-          case .failed(let error):
-            listener.cancel()
-            continuation.resume(throwing: error)
-          default:
-            break
-          }
-        }
-        listener.start(queue: DispatchQueue(label: "aria2.port"))
-      } catch {
-        continuation.resume(throwing: error)
+    let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+    guard socketFD >= 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+    }
+    defer { close(socketFD) }
+
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.stride)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = in_port_t(0).bigEndian
+    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+    let bindResult = withUnsafePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.stride))
       }
     }
+    guard bindResult == 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+    }
+
+    var boundAddress = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.stride)
+    let nameResult = withUnsafeMutablePointer(to: &boundAddress) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(socketFD, $0, &length)
+      }
+    }
+    guard nameResult == 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+    }
+
+    return Int(UInt16(bigEndian: boundAddress.sin_port))
   }
 
   static func makeSnapshot(item: [String: Any]) -> Aria2TaskSnapshot? {

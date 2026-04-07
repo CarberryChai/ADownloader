@@ -180,6 +180,54 @@ struct CompletedDownloadCard: View {
   }
 }
 
+struct TrashDownloadCard: View {
+  let task: DownloadTask
+  let onDelete: () -> Void
+
+  var body: some View {
+    DownloadCardContainer {
+      HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
+          Text(task.displayName)
+            .font(.title3.weight(.semibold))
+            .lineLimit(2)
+
+          Text(task.sourceURL)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+
+          HStack(spacing: 18) {
+            Text(task.directoryPath)
+            Text(task.updatedAt.dateString)
+          }
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        }
+
+        Spacer(minLength: 16)
+
+        cardActionButton("彻底删除", systemImage: "trash", action: onDelete)
+      }
+    }
+  }
+
+  private func cardActionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.title3)
+        .frame(width: 46, height: 46)
+    }
+    .buttonStyle(.plain)
+    .background(
+      RoundedRectangle(cornerRadius: 23, style: .continuous)
+        .fill(Color.white.opacity(0.92))
+        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+    )
+    .accessibilityLabel(title)
+  }
+}
+
 struct DownloadCardContainer<Content: View>: View {
   @ViewBuilder var content: Content
 

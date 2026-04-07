@@ -13,6 +13,7 @@ import SwiftData
 enum DownloadSidebar: String, CaseIterable, Identifiable {
   case active
   case completed
+  case trash
 
   var id: String { rawValue }
 
@@ -22,6 +23,8 @@ enum DownloadSidebar: String, CaseIterable, Identifiable {
       "正在下载"
     case .completed:
       "已完成"
+    case .trash:
+      "回收站"
     }
   }
 
@@ -31,6 +34,8 @@ enum DownloadSidebar: String, CaseIterable, Identifiable {
       "arrow.down.circle"
     case .completed:
       "checkmark.circle"
+    case .trash:
+      "trash"
     }
   }
 }
@@ -41,6 +46,7 @@ final class DownloadStore {
   var selectedSidebar: DownloadSidebar = .active
   var activeTasks: [DownloadTask] = []
   var completedTasks: [DownloadTask] = []
+  var removedTasks: [DownloadTask] = []
   var alertMessage: String?
 
   @ObservationIgnored private let service = Aria2Service()
@@ -137,15 +143,32 @@ final class DownloadStore {
   }
 
   func cancel(_ task: DownloadTask) async {
-    guard let modelContext else { return }
-
     do {
       if let gid = task.gid {
         try await service.remove(gid: gid)
       }
 
       stopDirectoryAccess(for: task)
-      modelContext.delete(task)
+      task.gid = nil
+      task.status = .removed
+      task.downloadSpeed = 0
+      task.connections = 0
+      task.errorMessage = nil
+      task.updatedAt = .now
+      try saveContext()
+      reloadTasks()
+    } catch {
+      alertMessage = error.localizedDescription
+    }
+  }
+
+  func permanentlyDelete(_ task: DownloadTask) {
+    guard let modelContext else { return }
+
+    stopDirectoryAccess(for: task)
+    modelContext.delete(task)
+
+    do {
       try saveContext()
       reloadTasks()
     } catch {
@@ -262,7 +285,11 @@ final class DownloadStore {
           stopDirectoryAccess(for: task)
         case .removed:
           stopDirectoryAccess(for: task)
-          modelContext.delete(task)
+          task.status = .removed
+          task.gid = nil
+          task.downloadSpeed = 0
+          task.connections = 0
+          task.updatedAt = .now
         case .active, .waiting, .paused:
           startDirectoryAccess(for: task)
         case .error:
@@ -298,6 +325,9 @@ final class DownloadStore {
     completedTasks = allTasks
       .filter { $0.status == .complete }
       .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+    removedTasks = allTasks
+      .filter { $0.status == .removed }
+      .sorted { $0.updatedAt > $1.updatedAt }
   }
 
   private func fetchAllTasks() -> [DownloadTask] {
