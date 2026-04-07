@@ -6,16 +6,30 @@
 //
 
 import AppKit
+import SwiftData
 import SwiftUI
 
 @main
 struct ADownloaderApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+  private let sharedModelContainer: ModelContainer = {
+    let schema = Schema([
+      DownloadTask.self,
+    ])
+    let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+    do {
+      return try ModelContainer(for: schema, configurations: [configuration])
+    } catch {
+      fatalError("Could not create ModelContainer: \(error)")
+    }
+  }()
 
   var body: some Scene {
     Window("ADownloader", id: WindowCoordinator.mainWindowID) {
       ContentView()
     }
+    .modelContainer(sharedModelContainer)
 
     Settings {
       Text("hello")
