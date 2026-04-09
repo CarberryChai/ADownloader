@@ -74,13 +74,13 @@ final class DownloadStore {
     }
   }
 
-  func addDownload(sourceURLString: String, directoryURL: URL) async {
-    guard let modelContext else { return }
+  func addDownload(sourceURLString: String, directoryURL: URL) async -> Bool {
+    guard let modelContext else { return false }
 
     let trimmedURL = sourceURLString.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let sourceURL = URL(string: trimmedURL), let scheme = sourceURL.scheme, ["http", "https", "magnet"].contains(scheme.lowercased()) else {
       alertMessage = "请输入有效的下载链接。"
-      return
+      return false
     }
 
     do {
@@ -109,8 +109,10 @@ final class DownloadStore {
       task.updatedAt = .now
       try saveContext()
       await syncNow()
+      return true
     } catch {
       alertMessage = error.localizedDescription
+      return false
     }
   }
 
@@ -271,7 +273,7 @@ final class DownloadStore {
   }
 
   private func applySnapshots(_ snapshots: [Aria2TaskSnapshot]) {
-    guard let modelContext else { return }
+    guard modelContext != nil else { return }
 
     let snapshotsByGID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.gid, $0) })
     let allTasks = fetchAllTasks()
@@ -392,29 +394,27 @@ final class DownloadStore {
     directoryURL.stopAccessingSecurityScopedResource()
   }
 
-  private func resolvedFileURL(for task: DownloadTask) throws -> URL {
+  private func candidateFileURLs(for task: DownloadTask) -> [URL] {
     let directoryURL = resolveDirectoryURL(for: task) ?? URL(filePath: task.directoryPath, directoryHint: .isDirectory)
-    return directoryURL.appending(path: task.fileName)
+    return [
+      directoryURL.appending(path: task.fileName),
+      directoryURL.appending(path: task.displayName),
+    ]
   }
 
   private func resolvedOpenTargetURL(for task: DownloadTask) throws -> URL {
-    let directoryURL = resolveDirectoryURL(for: task) ?? URL(filePath: task.directoryPath, directoryHint: .isDirectory)
-    let candidates = [
-      directoryURL.appending(path: task.fileName),
-      directoryURL.appending(path: task.displayName),
-      directoryURL,
-    ]
+    let candidates = candidateFileURLs(for: task)
 
     if let existing = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }) {
       return existing
     }
 
-    return candidates[0]
+    throw CocoaError(.fileNoSuchFile)
   }
 
   private func fileExists(for task: DownloadTask) -> Bool {
-    guard let fileURL = try? resolvedOpenTargetURL(for: task) else { return false }
-    return FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false))
+    candidateFileURLs(for: task)
+      .contains { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
   }
 }
 

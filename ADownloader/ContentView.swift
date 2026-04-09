@@ -128,7 +128,10 @@ struct ContentView: View {
 
       Task { @MainActor in
         guard let directoryURL = selectDownloadDirectory() else { return }
-        await store.addDownload(sourceURLString: sourceURL, directoryURL: directoryURL)
+        let didAddTask = await store.addDownload(sourceURLString: sourceURL, directoryURL: directoryURL)
+        if didAddTask, store.selectedSidebar != .active {
+          store.selectedSidebar = .active
+        }
       }
     }
     .alert(
